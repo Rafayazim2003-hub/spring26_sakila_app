@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(pip list:*)",
-      "Bash(cd \"D:/ClaudeProjects/sakila_app/sakila_flask_app_2\" && python generate_architecture_diagram.py)",
-      "Bash(cd \"D:/ClaudeProjects/sakila_app/sakila_flask_app_2\" && python generate_workflow_diagram.py)"
-    ]
-  }
-}
