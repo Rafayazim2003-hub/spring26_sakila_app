@@ -1,12 +1,12 @@
 # Name: Rafay Azim
-# Name: Rafay Azim
+# Name: Rafay 
 # Date: 2026-04-24
 # Purpose: Combined config after merge conflict resolution
 
 import os
 
 class Config:
-    """Base configuration class for Sakila Flask application"""
+    "Configuration class including database, timeout, and health check settings"
     
     MYSQL_HOST = 'sakila-db-server'
     
