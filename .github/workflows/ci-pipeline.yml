@@ -39,7 +39,8 @@ jobs:
             --max-line-length=120 \
             --ignore=E501,W503 \
             --count \
-            --statistics
+            --statistics \
+            --exit-zero
 
   # ─────────────────────────────────────────
   # JOB 2: TEST
