@@ -1,4 +1,6 @@
 name: Deploy Pipeline
+permissions:
+  contents: write
 
 # ─────────────────────────────────────────
 # TRIGGER CONFIGURATION
