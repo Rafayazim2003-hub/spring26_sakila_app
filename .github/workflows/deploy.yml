@@ -1,0 +1,258 @@
+name: Deploy Pipeline
+
+# ─────────────────────────────────────────
+# TRIGGER CONFIGURATION
+# ─────────────────────────────────────────
+on:
+  # Trigger 1: After CI Pipeline completes successfully on main
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
+    branches:
+      - main
+
+  # Trigger 2: Push to main with path filtering
+  push:
+    branches:
+      - main
+    paths:
+      # INCLUDE - trigger on these files
+      - 'app.py'
+      - 'config.py'
+      - 'templates/**'
+      - 'static/**'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'docker-compose.yml'
+      # EXCLUDE - do NOT trigger on these
+      - '!README.md'
+      - '!docs/**'
+      - '!*.md'
+      - '!.gitignore'
+
+# ─────────────────────────────────────────
+# WORKFLOW LEVEL VARIABLES
+# ─────────────────────────────────────────
+env:
+  IMAGE_NAME: sakila-app
+  REGISTRY: docker.io
+
+jobs:
+
+  # ─────────────────────────────────────────
+  # JOB 1: DEPLOY TO STAGING
+  # ─────────────────────────────────────────
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+
+    # Only run if CI pipeline succeeded (for workflow_run trigger)
+    if: >
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success')
+
+    # Link to staging environment
+    environment:
+      name: staging
+      url: http://localhost:5000
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Print deployment info
+        run: |
+          echo "========================================"
+          echo "  STAGING DEPLOYMENT STARTED"
+          echo "========================================"
+          echo "Repository:  ${{ github.repository }}"
+          echo "Branch:      ${{ github.ref_name }}"
+          echo "Commit SHA:  ${{ github.sha }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Event:       ${{ github.event_name }}"
+          echo "Timestamp:   $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "========================================"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build staging Docker image
+        run: |
+          docker build -t ${{ env.IMAGE_NAME }}:staging-${{ github.sha }} .
+          echo "Built image: ${{ env.IMAGE_NAME }}:staging-${{ github.sha }}"
+
+      - name: Run staging container
+        run: |
+          docker run -d \
+            --name staging-container \
+            -p 5000:5000 \
+            -e ENVIRONMENT=staging \
+            -e MYSQL_HOST=127.0.0.1 \
+            -e MYSQL_USER=root \
+            -e MYSQL_PASSWORD=admin \
+            -e MYSQL_DB=sakila \
+            ${{ env.IMAGE_NAME }}:staging-${{ github.sha }}
+          echo "Staging container started successfully"
+          sleep 5
+          docker ps | grep staging-container
+
+      - name: Verify staging deployment
+        run: |
+          echo "Verifying staging container is running..."
+          docker inspect staging-container --format='{{.State.Status}}'
+
+      - name: Cleanup staging container
+        run: docker rm -f staging-container
+        if: always()
+
+      - name: Simulate Slack notification
+        run: |
+          echo "========================================"
+          echo "Slack notification: Deployment to staging successful!"
+          echo "App: ${{ github.repository }}"
+          echo "Version: ${{ github.sha }}"
+          echo "Environment: staging"
+          echo "Status: SUCCESS"
+          echo "========================================"
+
+      # Write Job Summary to GitHub Actions UI
+      - name: Write deployment summary
+        run: |
+          echo "## 🚀 Staging Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | staging |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Repository** | ${{ github.repository }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Actor** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Timestamp** | $(date '+%Y-%m-%d %H:%M:%S') |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Deployment Checklist" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Code checked out" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Docker image built" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Container started successfully" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Deployment verified" >> $GITHUB_STEP_SUMMARY
+          echo "- [x] Slack notification sent" >> $GITHUB_STEP_SUMMARY
+
+  # ─────────────────────────────────────────
+  # JOB 2: DEPLOY TO PRODUCTION
+  # ─────────────────────────────────────────
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+
+    # Link to production environment (has manual approval)
+    environment:
+      name: production
+      url: http://localhost:5000
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Print production deployment info
+        run: |
+          echo "========================================"
+          echo "  PRODUCTION DEPLOYMENT STARTED"
+          echo "========================================"
+          echo "Repository:  ${{ github.repository }}"
+          echo "Branch:      ${{ github.ref_name }}"
+          echo "Commit SHA:  ${{ github.sha }}"
+          echo "Triggered by: ${{ github.actor }}"
+          echo "Timestamp:   $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "========================================"
+
+      - name: Generate version tag from date
+        id: version
+        run: |
+          VERSION="v$(date '+%Y.%m.%d')"
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "Generated version tag: $VERSION"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build production Docker image
+        run: |
+          docker build \
+            -t ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }} \
+            -t ${{ env.IMAGE_NAME }}:latest \
+            .
+          echo "Built production image: ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}"
+
+      - name: Simulate production deployment
+        run: |
+          echo "Deploying ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }} to production..."
+          echo "Production deployment simulation complete"
+
+      - name: Simulate Slack notification
+        run: |
+          echo "========================================"
+          echo "Slack notification: Deployment to production successful!"
+          echo "App: ${{ github.repository }}"
+          echo "Version: ${{ steps.version.outputs.VERSION }}"
+          echo "Environment: production"
+          echo "Status: SUCCESS"
+          echo "========================================"
+
+      - name: Create GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const version = "${{ steps.version.outputs.VERSION }}";
+            const sha = "${{ github.sha }}";
+
+            try {
+              // Create the tag first
+              await github.rest.git.createRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `refs/tags/${version}`,
+                sha: sha
+              });
+              console.log(`Tag ${version} created`);
+            } catch (e) {
+              console.log(`Tag may already exist: ${e.message}`);
+            }
+
+            // Create the release
+            const release = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: version,
+              name: `Production Release ${version}`,
+              body: `## Production Release ${version}\n\n` +
+                    `### Deployment Details\n` +
+                    `- **Commit:** ${sha}\n` +
+                    `- **Branch:** main\n` +
+                    `- **Deployed by:** ${{ github.actor }}\n` +
+                    `- **Date:** ${new Date().toISOString()}\n\n` +
+                    `### Changes\n` +
+                    `Automated production deployment via GitHub Actions CI/CD pipeline.\n\n` +
+                    `### Docker Image\n` +
+                    `\`sakila-app:${version}\``,
+              draft: false,
+              prerelease: false
+            });
+
+            console.log(`Release created: ${release.data.html_url}`);
+
+      - name: Write production summary
+        run: |
+          echo "## 🎯 Production Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status** | ✅ Success |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Environment** | production |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | ${{ steps.version.outputs.VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Repository** | ${{ github.repository }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Actor** | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Timestamp** | $(date '+%Y-%m-%d %H:%M:%S') |" >> $GITHUB_STEP_SUMMARY
